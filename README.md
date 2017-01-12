@@ -1,5 +1,10 @@
 # lazy-map
 
+[![Travis build status][travis icon]][travis]
+
+[travis]: https://travis-ci.org/thinktopic/lazy-map
+[travis icon]: https://travis-ci.org/thinktopic/lazy-map.svg?branch=master
+
 > Lazy maps for Clojure
 
 Documentation hopefully will be coming soon.
