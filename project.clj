@@ -1,4 +1,4 @@
-(defproject thinktopic/lazy-map "0.1.0"
+(defproject thinktopic/lazy-map "0.1.1-SNAPSHOT"
   :description "Lazy maps for Clojure"
   :url "https://github.com/thinktopic/lazy-map"
   :license {:name "Eclipse Public License"
