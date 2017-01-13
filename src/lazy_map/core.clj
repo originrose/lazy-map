@@ -1,4 +1,9 @@
 (ns lazy-map.core
+  "Main namespace, contains utility functions, type definitions, and
+  lazy map functions.
+
+  Public API is `->LazyMap`, `->?LazyMap`, `lazy-map`, `force-map`,
+  `freeze-map`, `lazy-map-dispatch`."
   (:require [clojure
              [pprint :as pp]
              [string :as str]])
@@ -6,17 +11,34 @@
 
 ;;;; Utility functions
 
+(defmacro is-not-thrown?
+  "Used in clojure.test assertions because (is (not (thrown? ...)))
+  doesn't work. See http://acidwords.com/posts/2015-07-23-fixing-negation-in-clojure-test.html"
+  [e expr]
+  {:style/indent 1}
+  `(is (not ('thrown? ~e ~expr))))
+
 (defmacro extend-print
+  "Convenience macro for overriding the string representation of a
+  class. Note that you also need to override `toString` in order to
+  customize the return value of `str` on your object, and you need to
+  create your own dispatch function to customize the pretty-printed
+  representation."
+  {:private true}
   [class str-fn]
   `(do
+     ;; for serialization
      (defmethod print-dup ~class
        [obj# ^Writer writer#]
        (.write writer# ^String (~str-fn obj#)))
+     ;; for reader-friendly printing
      (defmethod print-method ~class
        [obj# ^Writer writer#]
        (.write writer# ^String (~str-fn obj#)))))
 
 (defn map-entry
+  "Creates a map entry (as returned by calling seq on a map) with the
+  given key and value."
   [k v]
   (clojure.lang.MapEntry/create k v))
 
@@ -54,6 +76,12 @@
       (= k 0) (map-entry 0 key_)
       (= k 1) (LazyMapEntry. 1 val_)
       :else nil))
+  (assoc [this k v]
+    (cond
+      (= k 0) (LazyMapEntry. v val_)
+      (= k 1) (LazyMapEntry. key_ v)
+      (= k 2) (vector k (force val_) v)
+      :else (throw (IndexOutOfBoundsException.))))
 
   clojure.lang.IFn
   (invoke [this k]
@@ -150,6 +178,9 @@
   java.util.RandomAccess)
 
 (defn lazy-map-entry
+  "Construct a lazy map entry with the given key and value. If you
+  want to take advantage of the laziness, the value should be a
+  delay."
   [k v]
   (LazyMapEntry. k v))
 
@@ -157,7 +188,11 @@
 
 ;;;; LazyMap type
 
-(declare LazyMap->printable)
+;; We need to use this function in .toString so it needs to be defined
+;; before the deftype. But the definition of this function needs a
+;; ^LazyMap type hint, so the definition can't come until after the
+;; deftype.
+(declare freeze-map)
 
 (deftype LazyMap [^clojure.lang.IPersistentMap contents]
 
@@ -240,36 +275,30 @@
 
   java.lang.Object
   (toString [this]
-    (str (LazyMap->printable this))))
+    (str (freeze-map (->PlaceholderText "<unrealized>") this))))
+
+(alter-meta!
+  #'->LazyMap assoc :doc
+  "Turn a regular map into a lazy map. Any values that are delays
+  are interpreted as values that have yet to be realized.")
 
 (extend-print LazyMap #(.toString ^LazyMap %))
 
 ;;;; Functions for working with lazy maps
 
-(defn LazyMap->printable
-  "Converts a lazy map to a regular map that has placeholder text
-  for the unrealized values. No matter what is done to the returned
-  map, the original map will not be forced."
-  [m]
-  (map-vals #(if (and (delay? %)
-                      (not (realized? %)))
-               (->PlaceholderText "<unrealized>")
-               (force %))
-            (.contents ^LazyMap m)))
-
-(defn lazy-map-dispatch
-  "This is a dispatch function for clojure.pprint that prints
-  lazy maps without forcing them."
-  [obj]
-  (cond
-    (instance? LazyMap obj)
-    (pp/simple-dispatch (LazyMap->printable obj))
-    (instance? PlaceholderText obj)
-    (pr obj)
-    :else
-    (pp/simple-dispatch obj)))
+(defn ->?LazyMap
+  "Behaves the same as ->LazyMap, except that if m is already a lazy
+  map, returns it directly. This prevents the creation of a lazy map
+  wrapping another lazy map, which (while not terribly wrong) is not
+  the best idea."
+  [map]
+  (if (instance? LazyMap map)
+    map
+    (->LazyMap map)))
 
 (defmacro lazy-map
+  "Constructs a lazy map from a literal map. None of the values are
+  evaluated until they are accessed from the map."
   [map]
   `(->LazyMap
      ~(->> map
@@ -280,15 +309,41 @@
 
 (defn force-map
   "Realizes all the values in a lazy map, returning a regular map."
-  [m]
-  (into {} m))
+  [map]
+  (into {} map))
 
-(defn ->?LazyMap
-  "Behaves the same as ->LazyMap, except that if m is already a lazy
-  map, returns it directly. This prevents the creation of a lazy map
-  wrapping another lazy map, which (while not terribly wrong) is not
-  the best."
-  [m]
-  (if (instance? LazyMap m)
-    m
-    (->LazyMap m)))
+(defn freeze-map
+  "Replace all the unrealized values in a lazy map with placeholders,
+  returning a regular map. No matter what is done to the returned map,
+  the values in the original map will not be forced. v can be an
+  object to use for all the values or a function of the key."
+  [val map]
+  (let [val (if (fn? val)
+              val
+              (constantly val))]
+    (reduce-kv (fn [m k v]
+                 (assoc m k (if (and (delay? v)
+                                     (not (realized? v)))
+                              (val k)
+                              (force v))))
+               {}
+               (.contents ^LazyMap map))))
+
+(defn lazy-map-dispatch
+  "This is a dispatch function for clojure.pprint that prints
+  lazy maps without forcing them."
+  [obj]
+  (cond
+    (instance? LazyMap obj)
+    (pp/simple-dispatch (freeze-map (->PlaceholderText "<unrealized>") obj))
+    (instance? LazyMapEntry obj)
+    (pp/simple-dispatch
+      (let [raw-value (.val_ obj)]
+        (assoc obj 1 (if (and (delay? raw-value)
+                              (not (realized? raw-value)))
+                       (->PlaceholderText "<unrealized>")
+                       (force raw-value)))))
+    (instance? PlaceholderText obj)
+    (pr obj)
+    :else
+    (pp/simple-dispatch obj)))

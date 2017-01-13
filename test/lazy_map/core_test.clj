@@ -1,6 +1,8 @@
 (ns lazy-map.core-test
   (:require [lazy-map.core :refer :all]
-            [clojure.test :refer :all]))
+            [clojure.test :refer :all]
+            [clojure.pprint :as pp])
+  (:import [lazy_map.core LazyMap]))
 
 (defmacro error
   [& [msg]]
@@ -29,11 +31,11 @@
   (is (= (vec (map-entry nil nil)) [nil nil])))
 
 (defn make-lazy-map
-  []
-  (->LazyMap
-    {:a (delay (error "value :a should not be realized"))
-     :b 50
-     :c (delay (error "value :c should not be realized"))}))
+  [& [constructor]]
+  ((or constructor ->LazyMap)
+   {:a (delay (error "value :a should not be realized"))
+    :b 50
+    :c (delay (error "value :c should not be realized"))}))
 
 (deftest lazy-map-test
   (testing "lazy maps are lazy"
@@ -108,16 +110,46 @@
                         {:a 1
                          :b (delay 2)}))
            {:a 1 :b 2})))
-  (testing "string representation of lazy maps"
+  (testing "str representation of lazy maps"
+    (is (= (str (->LazyMap {:a 1}))
+           "{:a 1}"))
+    (is (= (str (->LazyMap {:a (delay 1)}))
+           "{:a <unrealized>}")))
+  (testing "pr-str representation of lazy maps"
     (is (= (pr-str (->LazyMap {:a 1}))
            "{:a 1}"))
     (is (= (pr-str (->LazyMap {:a (delay 1)}))
            "{:a <unrealized>}")))
-  (testing "string representation of lazy map entries"
+  (testing "pprint representation of lazy maps"
+    (is (= (with-out-str (pp/with-pprint-dispatch lazy-map-dispatch
+                           (pp/pprint (->LazyMap {:a 1}))))
+           (format "{:a 1}%n")))
+    (is (= (with-out-str (pp/with-pprint-dispatch lazy-map-dispatch
+                           (pp/pprint (->LazyMap {:a (delay 1)}))))
+           (format "{:a <unrealized>}%n"))))
+  (testing "str representation of lazy map entries"
+    (is (= (str (lazy-map-entry :a 1))
+           "[:a 1]"))
+    (is (= (str (lazy-map-entry :a (delay 1)))
+           "[:a <unrealized>]")))
+  (testing "pr-str representation of lazy map entries"
     (is (= (pr-str (lazy-map-entry :a 1))
            "[:a 1]"))
     (is (= (pr-str (lazy-map-entry :a (delay 1)))
            "[:a <unrealized>]")))
+  (testing "pprint representation of lazy map entries"
+    (is (= (with-out-str (pp/with-pprint-dispatch lazy-map-dispatch
+                           (pp/pprint (lazy-map-entry :a 1))))
+           (format "[:a 1]%n")))
+    (is (= (with-out-str (pp/with-pprint-dispatch lazy-map-dispatch
+                           (pp/pprint (lazy-map-entry :a (delay 1)))))
+           (format "[:a <unrealized>]%n"))))
+  (testing "->?LazyMap function"
+    (is (= (:b (make-lazy-map ->?LazyMap))
+           50))
+    (is (not (instance? LazyMap
+                        (.contents ^LazyMap
+                                   (->?LazyMap (make-lazy-map)))))))
   (testing "lazy-map macro"
     (is (= (with-out-str
              (let [m (lazy-map
@@ -135,4 +167,15 @@
              (with-out-str)
              (re-seq #"value :[ab] was realized")
              (set))
-           #{"value :a was realized" "value :b was realized"}))))
+           #{"value :a was realized" "value :b was realized"})))
+  (testing "freezing a lazy map"
+    (= (->> (make-lazy-map)
+         (freeze-map :foo))
+       {:a :foo
+        :b 50
+        :c :foo})
+    (= (->> (make-lazy-map)
+         (freeze-map name))
+       {:a "a"
+        :b 50
+        :c "c"})))
