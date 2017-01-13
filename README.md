@@ -103,6 +103,11 @@ of lazy maps.
 
 [unit tests]: src/lazy_map/core_test.clj
 
+## Organization
+
+All the code is currently in the `lazy-map.core` namespace, and the
+unit tests are in the `lazy-map.core-test` namespace.
+
 ## See also
 
 **[Malabarba's implementation] of lazy maps in Clojure.**
