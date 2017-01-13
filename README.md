@@ -70,8 +70,8 @@ are taken as unrealized values:
 You might prefer to use `->?LazyMap` instead of `->LazyMap`. The only
 difference is that `->?LazyMap` acts as the identity function if you
 pass it a map that is already lazy. This prevents nested lazy maps,
-which are not inherently wrong but could be bad for performance if you
-nest them thousands of layers deep.
+which are not inherently wrong but which could be bad for performance
+if you nest them thousands of layers deep.
 
 There are also some utility functions for dealing with lazy maps. You
 can use `force-map` to compute all of the values in a lazy map.
@@ -79,14 +79,15 @@ Alternatively, you can use `freeze-map` to replace all the unrealized
 values with a placeholder. Here is an illustration:
 
     user> (lm/force-map
-            (lm/lazy-map {:a (do (println "resolved") :foo)}))
-    resolved
-    {:a :foo}
+            (lm/->LazyMap {:a (delay :foo)
+                           :b :bar}))
+    {:a :foo, :b :bar}
     user> (lm/force-map
             (lm/freeze-map
-              :bar
-              (lm/lazy-map {:a (do (println "resolved") :foo)})))
-    {:a :bar}
+              :quux
+              (lm/->LazyMap {:a (delay :foo)
+                             :b :bar})))
+    {:a :quux, :b :bar}
 
 Finally, lazy maps will automatically avoid computing their values
 when they are converted to strings using `str`, `pr-str`, and
@@ -94,7 +95,7 @@ when they are converted to strings using `str`, `pr-str`, and
 special pretty-print dispatch function:
 
     user> (pp/with-pprint-dispatch lm/lazy-map-dispatch
-            (pp/pprint (lazy-map {:a (println "lazy")})))
+            (pp/pprint (lm/lazy-map {:a (println "lazy")})))
     {:a <unrealized>}
 
 Check out the [unit tests] for more information on the exact behavior
